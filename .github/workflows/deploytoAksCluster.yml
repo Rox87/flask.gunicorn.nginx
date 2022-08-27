@@ -1,0 +1,50 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: 49e9fa4553944c76a98320ea9580f896.azurecr.io
+        username: ${{ secrets.acr_49e9fa4553944c76a98320ea9580f896_username }}
+        password: ${{ secrets.acr_49e9fa4553944c76a98320ea9580f896_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/flask_app" -f  "flask_app/Dockerfile" -t 49e9fa4553944c76a98320ea9580f896.azurecr.io/aksteste:${{ github.sha }} --label dockerfile-path=flask_app/Dockerfile
+        docker push 49e9fa4553944c76a98320ea9580f896.azurecr.io/aksteste:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_aksteste_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep aks_teste8d78 | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace aks_teste8d78`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: aks_teste8d78
+        container-registry-url: 49e9fa4553944c76a98320ea9580f896.azurecr.io
+        container-registry-username: ${{ secrets.acr_49e9fa4553944c76a98320ea9580f896_username }}
+        container-registry-password: ${{ secrets.acr_49e9fa4553944c76a98320ea9580f896_password }}
+        secret-name: akstestedockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: aks_teste8d78
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+        images: |
+          49e9fa4553944c76a98320ea9580f896.azurecr.io/aksteste:${{ github.sha }}
+        imagepullsecrets: |
+          akstestedockerauth
